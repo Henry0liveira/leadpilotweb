@@ -1,4 +1,4 @@
-import {scanMaps} from '../lib/maps-scan.mjs';
+import {scanMaps,ScanError} from '../lib/maps-scan.mjs';
 const limits=new Map();
 export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now,scan=scanMaps}={}){
  return async function handler(req,res){
@@ -23,9 +23,10 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now,scan
    const limit=limits.get(user.id)||{start:time,last:0,count:0};
    if(limit.count>=6||(limit.count&&time-limit.last<15000))return res.status(429).json({error:'Limite de consultas atingido. Aguarde antes de pesquisar novamente.'});
    limits.set(user.id,{start:limit.start,last:time,count:limit.count+1});
-   const data=await scan({city:city.trim(),category:category.trim(),deadline:started+48000});
+   console.info('[maps-scan] authorized request');
+   const data=await scan({city:city.trim(),category:category.trim(),deadline:started+53000});
    return res.status(200).json({...data,nextPageToken:null});
-  }catch(e){return res.status(502).json({error:'O extrator não conseguiu concluir a consulta. A fonte pode estar indisponível ou limitar a automação.'});}
+  }catch(e){const code=e instanceof ScanError?e.code:'SCAN_FAILED';console.warn('[maps-scan] failure',code);return res.status(502).json({code,error:(e instanceof ScanError?e.message:'O extrator não conseguiu concluir a consulta.')+' ('+code+')'});}
  };
 }
 export default createHandler();
