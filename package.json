@@ -1,0 +1,13 @@
+{
+  "name": "leadpilot-web",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/places.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

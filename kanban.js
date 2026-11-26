@@ -1,0 +1,51 @@
+import {restoreSession, user, config} from './supabase.js';
+const states=[['todo','A fazer','#8a94a9'],['doing','Em andamento','#7d8dfb'],['review','Em validação','#d6a247'],['done','Concluído','#48bf91']];
+const names=[['unassigned','Sem responsável'],['Henry','Henry'],['Matheus','Matheus'],['Inácio','Inácio'],['Todos','Todos os sócios']];
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const opts=(list,val)=>list.map(([k,n])=>'<option value="'+esc(k)+'"'+(k===val?' selected':'')+'>'+esc(n)+'</option>').join('');
+const launch=document.createElement('button');launch.id='orb-launch';launch.textContent='▦ Gestão Orbyta';launch.hidden=true;document.body.append(launch);
+const board=document.createElement('dialog');board.id='orb-board';board.innerHTML='<div class="orb-wrap"><header><div><h1>Gestão Orbyta</h1><p>Kanban compartilhado · Henry, Matheus e Inácio</p></div><div class="orb-actions"><button id="orb-refresh">Atualizar</button><button class="orb-primary" id="orb-new">+ Nova tarefa</button><button id="orb-close">Voltar ao LeadPilot</button></div></header><div id="orb-summary"></div><div class="orb-toolbar"><input id="orb-search" placeholder="Pesquisar tarefas" aria-label="Pesquisar tarefas"><select id="orb-person" aria-label="Responsável"></select><select id="orb-priority" aria-label="Prioridade"><option value="">Todas as prioridades</option><option>P0</option><option>P1</option><option>P2</option></select></div><p id="orb-error" role="status"></p><div class="orb-grid" id="orb-columns"></div></div>';document.body.append(board);
+const editor=document.createElement('dialog');editor.id='orb-edit';editor.innerHTML='<form><h2 id="orb-edit-title">Tarefa</h2><label>Título<input name="title" maxlength="200" required></label><label>Descrição<textarea name="description" rows="3" maxlength="10000"></textarea></label><div class="orb-pair"><label>Status<select name="status"></select></label><label>Prioridade<select name="priority"><option>P0</option><option>P1</option><option>P2</option></select></label><label>Responsável<select name="assignee"></select></label><label>Prazo<input name="due_date" type="date"></label></div><label>Checklist (uma linha por item; [x] para concluído)<textarea name="checklist" rows="4" placeholder="[ ] Preparar proposta"></textarea></label><p id="orb-edit-error" role="status" style="color:#ffb0b0;margin:0"></p><div class="orb-buttons"><button type="button" id="orb-delete" class="orb-danger">Excluir</button><button type="button" id="orb-cancel">Cancelar</button><button class="orb-primary" type="submit">Salvar</button></div></form>';document.body.append(editor);
+const $=id=>document.getElementById(id), form=editor.querySelector('form');
+$('orb-person').innerHTML=opts([['','Todos os responsáveis'],...names],'');
+form.elements.status.innerHTML=opts(states,'todo');form.elements.assignee.innerHTML=opts(names,'unassigned');
+let tasks=[],workspace=null,editing=null,busy=false,loading=false,dragId=null;
+async function api(path,method='GET',body){
+  await restoreSession();
+  const session=JSON.parse(sessionStorage.getItem('leadpilot.session.v1')||'null');
+  if(!session?.access_token)throw Error('Entre no LeadPilot para acessar o Kanban.');
+  const c=config(); const r=await fetch(c.url+'/rest/v1/'+path,{method,headers:{apikey:c.key,Authorization:'Bearer '+session.access_token,'Content-Type':'application/json',Prefer:'return=representation'},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const data=await r.json().catch(()=>null);if(!r.ok)throw Error(data?.message||'Não foi possível acessar o Kanban.');return data;
+}
+async function load(){
+ if(loading||busy||!board.open||editor.open)return;loading=true;
+ try{const members=await api('workspace_members?select=workspace_owner_id&role=eq.admin');if(members?.length!==1)throw Error('Workspace administrativo não encontrado ou ambíguo.');
+ workspace=members[0].workspace_owner_id;tasks=await api('orbyta_tasks?owner_id=eq.'+encodeURIComponent(workspace)+'&select=*&order=created_at.asc,id.asc');$('orb-error').textContent='';render();}
+ catch(e){$('orb-error').textContent=e.message;}finally{loading=false;}
+}
+function render(){
+ const q=$('orb-search').value.trim().toLowerCase(),who=$('orb-person').value,p=$('orb-priority').value;
+ const shown=tasks.filter(t=>(!who||t.assignee===who)&&(!p||t.priority===p)&&(!q||(t.title+' '+t.description).toLowerCase().includes(q)));
+ const done=tasks.filter(t=>t.status==='done').length, pct=tasks.length?Math.round(done/tasks.length*100):0;
+ $('orb-summary').innerHTML='<strong>'+done+' de '+tasks.length+' tarefas concluídas · '+pct+'%</strong><div class="orb-progress"><span style="width:'+pct+'%"></span></div>';
+ $('orb-columns').innerHTML=states.map(([status,label,color],i)=>{const list=shown.filter(t=>t.status===status);return '<section class="orb-col" data-status="'+status+'" style="--accent:'+color+'"><h2>'+label+' · '+list.length+'</h2>'+list.map(t=>{const ck=Array.isArray(t.checklist)?t.checklist:[], overdue=t.due_date&&t.status!=='done'&&t.due_date<new Date().toLocaleDateString('sv-SE');return '<article class="orb-card" draggable="true" data-id="'+esc(t.id)+'"><small class="orb-prio '+(t.priority==='P0'?'orb-p0':'')+'">'+esc(t.priority)+'</small><strong>'+esc(t.title)+'</strong><small>'+esc(names.find(n=>n[0]===t.assignee)?.[1]||'Sem responsável')+(t.due_date?' · <span class="'+(overdue?'orb-overdue':'')+'">'+esc(t.due_date.split('-').reverse().join('/'))+'</span>':'')+(ck.length?' · '+ck.filter(x=>x.done).length+'/'+ck.length+' itens':'')+'</small><div class="orb-actions"><button data-move="-1" aria-label="Mover para etapa anterior" '+(i===0?'disabled':'')+'>←</button><button data-edit>Editar</button><button data-move="1" aria-label="Mover para próxima etapa" '+(i===3?'disabled':'')+'>→</button></div></article>'}).join('')+(list.length?'':'<p>Nenhuma tarefa</p>')+'</section>'}).join('');
+}
+function openEdit(t){editing=t||null;form.reset();$('orb-edit-title').textContent=t?'Editar tarefa':'Nova tarefa';form.elements.title.value=t?.title||'';form.elements.description.value=t?.description||'';form.elements.status.value=t?.status||'todo';form.elements.priority.value=t?.priority||'P1';form.elements.assignee.value=t?.assignee||'unassigned';form.elements.due_date.value=t?.due_date||'';form.elements.checklist.value=(t?.checklist||[]).map(x=>(x.done?'[x] ':'[ ] ')+String(x.text||'')).join('\n');$('orb-delete').hidden=!t;$('orb-edit-error').textContent='';editor.showModal();}
+async function mutate(path,method,data,fromEditor=false){if(busy)return;busy=true;try{const result=await api(path,method,data);if(!Array.isArray(result)||!result.length)throw Error('Nenhuma tarefa foi alterada. Atualize e tente novamente.');if(fromEditor)editor.close();}catch(e){$(fromEditor?'orb-edit-error':'orb-error').textContent=e.message;return;}finally{busy=false;}await load();}
+function target(id){return 'orbyta_tasks?id=eq.'+encodeURIComponent(id)+'&owner_id=eq.'+encodeURIComponent(workspace);}
+function move(id,status){if(!states.some(s=>s[0]===status)||!tasks.some(t=>t.id===id&&t.status!==status))return;mutate(target(id),'PATCH',{status,updated_at:new Date().toISOString()});}
+form.addEventListener('submit',e=>{e.preventDefault();if(!workspace||busy)return;const f=new FormData(form);const title=String(f.get('title')).trim();if(!title)return;const data={title,description:String(f.get('description')),status:f.get('status'),priority:f.get('priority'),assignee:f.get('assignee'),due_date:f.get('due_date')||null,checklist:String(f.get('checklist')).split('\n').map(s=>s.trim()).filter(Boolean).map(s=>({done:/^\[x\]/i.test(s),text:s.replace(/^\[[ x]\]\s*/i,'')})),updated_at:new Date().toISOString()};mutate(editing?target(editing.id):'orbyta_tasks',editing?'PATCH':'POST',editing?data:{...data,owner_id:workspace},true);});
+$('orb-delete').onclick=()=>{if(editing&&confirm('Excluir esta tarefa para todos os sócios?'))mutate(target(editing.id),'DELETE',undefined,true);};
+$('orb-cancel').onclick=()=>{if(!busy)editor.close();};editor.addEventListener('cancel',e=>{if(busy)e.preventDefault();});
+$('orb-new').onclick=()=>{if(workspace)openEdit(null);else $('orb-error').textContent='Aguarde o carregamento do workspace.';};$('orb-close').onclick=()=>board.close();$('orb-refresh').onclick=load;
+for(const id of ['orb-search','orb-person','orb-priority'])$(id).addEventListener(id==='orb-search'?'input':'change',render);
+$('orb-columns').addEventListener('click',e=>{const b=e.target.closest('button'),card=e.target.closest('[data-id]');if(!b||!card||b.disabled)return;const t=tasks.find(x=>x.id===card.dataset.id);if(!t)return;if(b.hasAttribute('data-edit'))openEdit(t);else if(b.dataset.move){const i=states.findIndex(x=>x[0]===t.status)+Number(b.dataset.move);if(states[i])move(t.id,states[i][0]);}});
+$('orb-columns').addEventListener('dragstart',e=>{const card=e.target.closest('[data-id]');if(card){dragId=card.dataset.id;e.dataTransfer.setData('text/plain',dragId);e.dataTransfer.effectAllowed='move';}});
+$('orb-columns').addEventListener('dragover',e=>{const col=e.target.closest('[data-status]');if(col&&dragId){e.preventDefault();col.classList.add('orb-over');}});
+$('orb-columns').addEventListener('dragleave',e=>{const col=e.target.closest('[data-status]');if(col&&!col.contains(e.relatedTarget))col.classList.remove('orb-over');});
+$('orb-columns').addEventListener('drop',e=>{const col=e.target.closest('[data-status]');if(col&&dragId){e.preventDefault();move(dragId,col.dataset.status);}dragId=null;board.querySelectorAll('.orb-over').forEach(x=>x.classList.remove('orb-over'));});
+$('orb-columns').addEventListener('dragend',()=>{dragId=null;board.querySelectorAll('.orb-over').forEach(x=>x.classList.remove('orb-over'));});
+launch.onclick=()=>{if(!user())return;board.showModal();load();};
+function syncLaunch(){const logged=!!user();launch.hidden=!logged;if(!logged){if(editor.open)editor.close();if(board.open)board.close();tasks=[];workspace=null;}}
+setInterval(()=>{syncLaunch();if(board.open&&!dragId&&!editor.open)load();},10000);
+new MutationObserver(syncLaunch).observe(document.getElementById('app'),{childList:true,subtree:true});syncLaunch();
