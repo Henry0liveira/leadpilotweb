@@ -197,3 +197,5 @@
 .gp-mobile-mark{display:inline-flex;align-items:center;color:#17824e;background:#e7f8ee;border-radius:6px;padding:2px 6px;font-size:11px;font-weight:600}
 .gp-prospect-dialog{width:min(520px,calc(100vw - 28px));max-height:90vh;overflow:auto;border:1px solid #dedfeb;border-radius:16px;padding:24px;background:var(--surface,#fff);color:var(--text,#17203b)}
 .gp-prospect-dialog::backdrop{background:#12152a88}.gp-prospect-dialog form{display:grid;gap:10px}.gp-prospect-dialog label{display:grid;gap:4px;font-size:13px}.gp-prospect-dialog input:not([type=checkbox]),.gp-prospect-dialog textarea{width:100%;box-sizing:border-box;border:1px solid #c9cbd8;border-radius:8px;padding:10px;background:transparent;color:inherit}.gp-prospect-dialog .gp-consent{display:flex;align-items:flex-start;gap:8px}.gp-prospect-dialog p{font-size:13px}.gp-business-actions{flex-wrap:wrap}
+
+.gp-qualification{padding:12px;border:1px solid #e1dced;border-radius:10px;display:grid;gap:5px}.gp-qualification small{line-height:1.5}.gp-qualification strong{font-size:18px}
