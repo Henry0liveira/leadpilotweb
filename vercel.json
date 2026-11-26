@@ -24,5 +24,11 @@
         }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/maps-scan.mjs": {
+      "maxDuration": 60,
+      "includeFiles": "node_modules/@sparticuz/chromium/bin/**"
+    }
+  }
 }

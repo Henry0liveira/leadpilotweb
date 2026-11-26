@@ -1,0 +1,3 @@
+# Google Maps — Extrator (beta)
+
+Separate authenticated live-query path in LeadPilot; Google Places API remains unchanged. Inspired by GustavoN-S/extrator-de-leads (MIT): visible card parsing, scrolling, deduplication and selective profile verification. Does not implement the original private network parser or guarantee result counts. No CAPTCHA bypass or automatic CRM persistence. Uses Puppeteer/Chromium on Vercel, bounded to 60 candidates and 48 seconds; partial results are explicitly marked. Google Maps terms restrict bulk extraction and reuse; use only if permitted by the source and applicable terms. Do not treat an absent website as evidence that the business has no website anywhere.
