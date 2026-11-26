@@ -11,3 +11,8 @@ test('scan works without Google Places key',async()=>{let n=0;const r=res();awai
 
 import {ScanError} from '../lib/maps-scan.mjs';
 test('source errors are distinct and do not expose secrets',async()=>{let n=0;const r=res();await createHandler({env,fetchImpl:async()=>({ok:true,json:async()=>++n===1?{id:'member-error'}:[{user_id:'member-error'}]}),scan:async()=>{throw new ScanError('BROWSER_START_FAILED','O Chromium não iniciou no servidor.')}})(req,r);assert.equal(r.code,502);assert.equal(r.data.code,'BROWSER_START_FAILED');});
+
+import {mergeCard} from '../lib/maps-scan.mjs';
+test('virtualized card updates preserve known contacts and ratings',()=>{const m=mergeCard({phone:'123',website:'https://example.com',websiteChecked:true,rating:4.5,address:'Rua A'},{phone:null,website:null,websiteChecked:false,rating:null,address:''});assert.equal(m.phone,'123');assert.equal(m.website,'https://example.com');assert.equal(m.websiteChecked,true);assert.equal(m.rating,4.5);assert.equal(m.address,'Rua A');});
+test('scan validates limit and mode before upstream',async()=>{const r=res();await createHandler({env,fetchImpl:()=>{throw Error('unexpected')}})({...req,body:{...req.body,limit:999}},r);assert.equal(r.code,400);});
+test('default scan prioritizes discovery with limit 100',async()=>{const r=res();let n=0;await createHandler({env,fetchImpl:async()=>({ok:true,json:async()=>++n===1?{id:'member-volume'}:[{user_id:'member-volume'}]}),scan:async x=>{assert.equal(x.limit,100);assert.equal(x.detailMode,'fast');return {places:[]}}})(req,r);assert.equal(r.code,200);});

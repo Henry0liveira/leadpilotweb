@@ -10,7 +10,8 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now,scan
   if(!url||!key)return res.status(503).json({error:'Integração indisponível.'});
   const started=now();
   try{
-   const {category,city}=req.body||{};
+   const {category,city,limit=100,detailMode='fast'}=req.body||{};
+   if(![50,100,150].includes(limit)||!['fast','complete'].includes(detailMode))return res.status(400).json({error:'Configuração de extração inválida.'});
    if(typeof city!=='string'||typeof category!=='string'||!city.trim()||!category.trim()||city.length>120||category.length>100)return res.status(400).json({error:'Informe cidade e segmento válidos.'});
    const base=url.replace(/\/$/,'');const headers={apikey:key,Authorization:token};
    const auth=await fetchImpl(base+'/auth/v1/user',{headers,signal:AbortSignal.timeout(8000)});
@@ -24,7 +25,7 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now,scan
    if(limit.count>=6||(limit.count&&time-limit.last<15000))return res.status(429).json({error:'Limite de consultas atingido. Aguarde antes de pesquisar novamente.'});
    limits.set(user.id,{start:limit.start,last:time,count:limit.count+1});
    console.info('[maps-scan] authorized request');
-   const data=await scan({city:city.trim(),category:category.trim(),deadline:started+53000});
+   const data=await scan({city:city.trim(),category:category.trim(),limit,detailMode,deadline:started+53000});
    return res.status(200).json({...data,nextPageToken:null});
   }catch(e){const code=e instanceof ScanError?e.code:'SCAN_FAILED';console.warn('[maps-scan] failure',code);return res.status(502).json({code,error:(e instanceof ScanError?e.message:'O extrator não conseguiu concluir a consulta.')+' ('+code+')'});}
  };
