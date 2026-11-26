@@ -1,4 +1,4 @@
-import {restoreSession, user, config} from './supabase.js';
+import {apiPath, user} from './supabase.js';
 const states=[['todo','A fazer','#8a94a9'],['doing','Em andamento','#7d8dfb'],['review','Em validação','#d6a247'],['done','Concluído','#48bf91']];
 const names=[['unassigned','Sem responsável'],['Henry','Henry'],['Matheus','Matheus'],['Inácio','Inácio'],['Todos','Todos os sócios']];
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,16 +10,10 @@ const $=id=>document.getElementById(id), form=editor.querySelector('form');
 $('orb-person').innerHTML=opts([['','Todos os responsáveis'],...names],'');
 form.elements.status.innerHTML=opts(states,'todo');form.elements.assignee.innerHTML=opts(names,'unassigned');
 let tasks=[],workspace=null,editing=null,busy=false,loading=false,dragId=null;
-async function api(path,method='GET',body){
-  await restoreSession();
-  const session=JSON.parse(sessionStorage.getItem('leadpilot.session.v1')||'null');
-  if(!session?.access_token)throw Error('Entre no LeadPilot para acessar o Kanban.');
-  const c=config(); const r=await fetch(c.url+'/rest/v1/'+path,{method,headers:{apikey:c.key,Authorization:'Bearer '+session.access_token,'Content-Type':'application/json',Prefer:'return=representation'},...(body===undefined?{}:{body:JSON.stringify(body)})});
-  const data=await r.json().catch(()=>null);if(!r.ok)throw Error(data?.message||'Não foi possível acessar o Kanban.');return data;
-}
+const api=apiPath;
 async function load(){
  if(loading||busy||!board.open||editor.open)return;loading=true;
- try{const members=await api('workspace_members?select=workspace_owner_id&role=eq.admin');if(members?.length!==1)throw Error('Workspace administrativo não encontrado ou ambíguo.');
+ try{const uid=user()?.id;if(!uid)throw Error('Sessão expirada.');const members=await api('workspace_members?select=workspace_owner_id&role=eq.admin&user_id=eq.'+encodeURIComponent(uid));if(members?.length!==1)throw Error('Workspace administrativo não encontrado ou ambíguo.');
  workspace=members[0].workspace_owner_id;tasks=await api('orbyta_tasks?owner_id=eq.'+encodeURIComponent(workspace)+'&select=*&order=created_at.asc,id.asc');$('orb-error').textContent='';render();}
  catch(e){$('orb-error').textContent=e.message;}finally{loading=false;}
 }
@@ -47,5 +41,5 @@ $('orb-columns').addEventListener('drop',e=>{const col=e.target.closest('[data-s
 $('orb-columns').addEventListener('dragend',()=>{dragId=null;board.querySelectorAll('.orb-over').forEach(x=>x.classList.remove('orb-over'));});
 launch.onclick=()=>{if(!user())return;board.showModal();load();};
 function syncLaunch(){const logged=!!user();launch.hidden=!logged;if(!logged){if(editor.open)editor.close();if(board.open)board.close();tasks=[];workspace=null;}}
-setInterval(()=>{syncLaunch();if(board.open&&!dragId&&!editor.open)load();},10000);
+setInterval(()=>{syncLaunch();if(board.open&&!dragId&&!editor.open&&!document.hidden)load();},30000);
 new MutationObserver(syncLaunch).observe(document.getElementById('app'),{childList:true,subtree:true});syncLaunch();
