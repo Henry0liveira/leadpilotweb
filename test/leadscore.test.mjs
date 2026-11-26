@@ -4,3 +4,5 @@ test('social hosts, actual websites and unknown data',()=>{assert.equal(siteStat
 test('score does not mistake unknown for absence',()=>{assert.equal(scorePlace({}).score,0);assert.equal(scorePlace({websiteChecked:true}).score,55);assert.ok(scorePlace({website:'https://instagram.com/a',phone:'(12) 99999-1234'}).score>scorePlace({website:'https://example.org',phone:'(12) 99999-1234'}).score);assert.equal(enrich({phone:'(12) 99999-1234'}).cellular,'5512999991234');});
 
 test('confirmed no site and mobile yield hot priority; unknown does not',()=>{assert.equal(scorePlace({websiteChecked:true,phone:'(12) 99999-1234'}).priority,'Quente');assert.equal(scorePlace({}).priority,'Frio');assert.equal(scorePlace({websiteChecked:true}).priority,'Morno');});
+
+test('both sources preserve verification and do not treat local IDs as Place IDs',()=>{assert.equal(enrich({id:'ChIJexample'},'places').googlePlaceId,'ChIJexample');assert.equal(enrich({id:'local'},'maps').googlePlaceId,null);assert.equal(enrich({websiteChecked:false},'maps').websiteState,'unknown');assert.equal(enrich({websiteChecked:true},'maps').websiteState,'absent');});
