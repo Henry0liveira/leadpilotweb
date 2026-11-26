@@ -20,9 +20,9 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now}={})
    const membership=await fetchImpl(base+'/rest/v1/workspace_members?select=user_id&user_id=eq.'+encodeURIComponent(user.id)+'&limit=1',{headers,signal:AbortSignal.timeout(8000)});
    if(!membership.ok||!(await membership.json()).some(m=>m.user_id===user.id))return res.status(403).json({error:'Acesso restrito à equipe LeadPilot.'});
    const time=now();for(const [id,v] of limits)if(time-v.start>=3600000)limits.delete(id);
-   const limit=limits.get(user.id)||{start:time,last:0,count:0};
-   if(limit.count>=30||(limit.count&&time-limit.last<2500))return res.status(429).json({error:'Limite de consultas atingido. Aguarde antes de pesquisar novamente.'});
-   limits.set(user.id,{start:limit.start,last:time,count:limit.count+1});
+   const quota=limits.get(user.id)||{start:time,last:0,count:0};
+   if(quota.count+limit/20>30||(quota.count&&time-quota.last<2500))return res.status(429).json({error:'Limite de consultas atingido. Aguarde antes de pesquisar novamente.'});
+   limits.set(user.id,{start:quota.start,last:time,count:quota.count+limit/20});
    const places=[],seen=new Set();let cursor=pageToken||null,notice='';
    for(let i=0;i<limit/20;i++){
     const r=await fetchImpl('https://places.googleapis.com/v1/places:searchText',{method:'POST',headers:{'Content-Type':'application/json','X-Goog-Api-Key':google,'X-Goog-FieldMask':fields},body:JSON.stringify({textQuery:category.trim()+' em '+city.trim()+', Brasil',languageCode:'pt-BR',regionCode:'BR',pageSize:20,...(cursor?{pageToken:cursor}:{})}),signal:AbortSignal.timeout(10000)});
