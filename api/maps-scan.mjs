@@ -21,9 +21,9 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now,scan
    const membership=await fetchImpl(base+'/rest/v1/workspace_members?select=user_id&user_id=eq.'+encodeURIComponent(user.id)+'&limit=1',{headers,signal:AbortSignal.timeout(8000)});
    if(!membership.ok||!(await membership.json()).some(m=>m.user_id===user.id))return res.status(403).json({error:'Acesso restrito à equipe LeadPilot.'});
    const time=now();for(const [id,v] of limits)if(time-v.start>=3600000)limits.delete(id);
-   const limit=limits.get(user.id)||{start:time,last:0,count:0};
-   if(limit.count>=6||(limit.count&&time-limit.last<15000))return res.status(429).json({error:'Limite de consultas atingido. Aguarde antes de pesquisar novamente.'});
-   limits.set(user.id,{start:limit.start,last:time,count:limit.count+1});
+   const quota=limits.get(user.id)||{start:time,last:0,count:0};
+   if(quota.count>=6||(quota.count&&time-quota.last<15000))return res.status(429).json({error:'Limite de consultas atingido. Aguarde antes de pesquisar novamente.'});
+   limits.set(user.id,{start:quota.start,last:time,count:quota.count+1});
    console.info('[maps-scan] authorized request');
    const data=await scan({city:city.trim(),category:category.trim(),limit,detailMode,deadline:started+53000});
    return res.status(200).json({...data,nextPageToken:null});
