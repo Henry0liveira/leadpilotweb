@@ -10,7 +10,7 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now,scan
   if(!url||!key)return res.status(503).json({error:'Integração indisponível.'});
   const started=now();
   try{
-   const {category,city,limit=100,detailMode='fast'}=req.body||{};
+   const {category,city,limit=100,detailMode='complete'}=req.body||{};
    if(![50,100,150].includes(limit)||!['fast','complete'].includes(detailMode))return res.status(400).json({error:'Configuração de extração inválida.'});
    if(typeof city!=='string'||typeof category!=='string'||!city.trim()||!category.trim()||city.length>120||category.length>100)return res.status(400).json({error:'Informe cidade e segmento válidos.'});
    const base=url.replace(/\/$/,'');const headers={apikey:key,Authorization:token};
