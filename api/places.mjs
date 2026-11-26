@@ -1,4 +1,19 @@
-const fields='places.id,places.displayName,places.formattedAddress,places.businessStatus,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.googleMapsUri,places.attributions,nextPageToken';
+const fields='places.id,places.displayName,places.formattedAddress,places.businessStatus,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.rating,places.userRatingCount,places.googleMapsUri,places.attributions,nextPageToken';
+const textValue=(...values)=>values.find(v=>typeof v==='string'&&v.trim())?.trim()||null;
+function websiteKind(url){
+ if(!url)return 'missing';
+ try{
+  const u=new URL(url);if(!['https:','http:'].includes(u.protocol))return 'unknown';
+  const host=u.hostname.toLowerCase().replace(/^www\./,'');
+  const platforms=['instagram.com','facebook.com','fb.com','fb.me','tiktok.com','linkedin.com','youtube.com','youtu.be','wa.me','whatsapp.com','linktr.ee','beacons.ai','ifood.com.br','rappi.com.br','bio.site'];
+  return platforms.some(d=>host===d||host.endsWith('.'+d))?'social':'website';
+ }catch{return 'unknown';}
+}
+export function normalizePlace(p){
+ const phone=textValue(p.nationalPhoneNumber,p.internationalPhoneNumber,p.formatted_phone_number,p.international_phone_number,p.phone);
+ const website=textValue(p.websiteUri,p.websiteURI,p.website);
+ return {id:p.id||p.place_id||null,name:p.displayName?.text||p.name||'',address:p.formattedAddress||p.formatted_address||p.address||'',phone,website,websiteKind:websiteKind(website),rating:p.rating??null,reviews:p.userRatingCount??p.user_ratings_total??p.reviews??null,maps:p.googleMapsUri||p.url||p.maps||null,attributions:Array.isArray(p.attributions)?p.attributions:[]};
+}
 const limits=new Map();
 export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now}={}){
  return async function handler(req,res){
@@ -25,7 +40,10 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now}={})
    const r=await fetchImpl('https://places.googleapis.com/v1/places:searchText',{method:'POST',headers:{'Content-Type':'application/json','X-Goog-Api-Key':google,'X-Goog-FieldMask':fields},body:JSON.stringify({textQuery:category.trim()+' em '+city.trim()+', Brasil',languageCode:'pt-BR',regionCode:'BR',pageSize:20,...(pageToken?{pageToken}:{})}),signal:AbortSignal.timeout(12000)});
    if(!r.ok)return res.status(r.status===429?429:502).json({error:r.status===429?'Limite da API Google atingido.':'Google Places recusou a consulta. Verifique faturamento, restrições da chave e Places API (New).'});
    const data=await r.json();
-   return res.status(200).json({places:(data.places||[]).filter(p=>p.businessStatus!=='CLOSED_PERMANENTLY').map(p=>({id:p.id,name:p.displayName?.text||'',address:p.formattedAddress||'',phone:p.nationalPhoneNumber||null,website:p.websiteUri||null,rating:p.rating??null,reviews:p.userRatingCount??null,maps:p.googleMapsUri||null,attributions:p.attributions||[]})),nextPageToken:data.nextPageToken||null});
+   if(data.places!=null&&!Array.isArray(data.places))return res.status(502).json({error:'Formato inesperado da resposta Google Places.'});
+   const places=(data.places||[]).filter(p=>p&&p.businessStatus!=='CLOSED_PERMANENTLY').map(normalizePlace);
+   const coverage={total:places.length,withPhone:places.filter(p=>p.phone).length,withWebsite:places.filter(p=>p.websiteKind==='website').length,social:places.filter(p=>p.websiteKind==='social').length,missing:places.filter(p=>p.websiteKind==='missing').length,unknown:places.filter(p=>p.websiteKind==='unknown').length};
+   return res.status(200).json({places,coverage,nextPageToken:data.nextPageToken||null});
   }catch{return res.status(502).json({error:'Não foi possível consultar os estabelecimentos.'});}
  };
 }
