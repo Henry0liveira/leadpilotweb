@@ -4,7 +4,7 @@ import { parseImport, isSameLead } from './importer.js';
 
 const $=selector=>document.querySelector(selector);
 const state={ready:false,me:null,view:'overview',loading:false,data:{contacts:[],conversations:[],messages:[],outcomes:[],leads:[],activities:[],botSettings:null},
-  selectedChat:null,thread:[],modal:null,search:'',outcomeFilter:'all',importSelection:new Set(),busy:false,refreshAt:null,importReport:null,mobileMenu:false};
+  loadErrors:[],selectedChat:null,thread:[],modal:null,search:'',outcomeFilter:'all',importSelection:new Set(),busy:false,refreshAt:null,importReport:null,mobileMenu:false};
 const labels={overview:'Visão geral',inbox:'Conversas',insights:'Inteligência IA',crm:'Pipeline CRM',prospects:'Prospecção',tasks:'Atividades',contacts:'Contatos'};
 const subtitles={overview:'Seu negócio, em uma única visão.',inbox:'Conversas reais registradas pelo WhatsApp.',insights:'Oportunidades identificadas nas conversas.',crm:'Acompanhe cada oportunidade até o fechamento.',prospects:'Importe, revise e selecione seus leads.',tasks:'Organize os próximos passos da operação.',contacts:'Sua base de contatos do WhatsApp.'};
 const STAGES=[['new','Novos'],['contacted','Em contato'],['interested','Interessados'],['proposal','Propostas'],['won','Fechados'],['lost','Perdidos']];
@@ -66,7 +66,7 @@ function sidebar(){
     <div class="workspace"><span class="workspace-avatar">O</span><div><strong>Orbyta Web & Development</strong><small>Workspace comercial</small></div>${icon('chevron',15)}</div>
     <div class="side-scroll"><div class="side-label">WORKSPACE</div>${btn('overview','grid')}${btn('inbox','messages')}${btn('insights','spark')}
     <div class="side-label top-spaced">OPERAÇÃO</div>${btn('crm','kanban')}${btn('prospects','search')}${btn('tasks','calendar')}${btn('contacts','users')}
-    </div><div class="side-footer"><div class="connection"><span class="connection-dot"></span><div><strong>Dados sincronizados</strong><small>Supabase · WhatsApp</small></div></div>
+    </div><div class="side-footer"><div class="connection"><span class="connection-dot"></span><div><strong>${state.loading?'Sincronizando…':state.loadErrors.length?'Sincronização parcial':state.refreshAt?'Dados sincronizados':'Aguardando sincronização'}</strong><small>Supabase · WhatsApp</small></div></div>
     <button class="sidebar-profile" data-logout>${initialsAvatar(state.me?.email||'U')}<span class="profile-text"><strong>${esc((state.me?.email||'Usuário').split('@')[0])}</strong><small>Encerrar sessão</small></span>${icon('logout',17)}</button></div>
   </aside>`;
 }
@@ -79,7 +79,7 @@ function shell(page){
   return `<div class="layout">${sidebar()}<main class="main">
     <header class="topbar"><div class="left-top"><button class="menu-button" data-menu aria-label="Abrir menu">${icon('menu',22)}</button><span class="breadcrumb">WORKSPACE</span><span class="crumb-sep">/</span><span class="breadcrumb-current">${labels[state.view]}</span></div><div class="top-actions">${botButton}<span class="updated">${state.refreshAt?'Atualizado '+rel(state.refreshAt):'Conectando…'}</span><button class="icon-button" title="Atualizar dados" data-refresh ${state.loading?'disabled':''}>${icon('refresh',18)}</button><span class="top-avatar">${esc(initials(state.me?.email))}</span></div></header>
     <div class="content"><div class="page-heading"><div><div class="heading-eyebrow"><span class="tiny-indicator"></span> LEADPILOT / ${esc(labels[state.view].toUpperCase())}</div><h1>${labels[state.view]}</h1><p>${subtitles[state.view]}</p></div><div class="heading-actions">${action}</div></div>
-    ${state.loading&&!state.refreshAt?`<div class="loading-area"><div class="spinner"></div><span>Buscando informações do Supabase…</span></div>`:page}
+    ${state.loadErrors.length?`<div role="status" class="loading-area" style="min-height:0;padding:12px">Sincronização parcial: ${esc(state.loadErrors.join(', '))}. <button class="btn outline small" data-refresh>Atualizar</button></div>`:''}${state.loading&&!state.refreshAt?`<div class="loading-area" style="min-height:0;padding:10px"><span>Sincronizando dados em segundo plano…</span></div>`:''}${page}
     <footer class="main-footer"><span>© 2026 Orbyta Web & Development · LeadPilot</span><span>Seu workspace comercial, conectado com segurança.</span></footer></div>
   </main>${state.mobileMenu?'<button class="mobile-overlay" data-menu aria-label="Fechar menu"></button>':''}</div>${modalHtml()}`;
 }
@@ -215,26 +215,40 @@ function render(){
   root.innerHTML=shell(page());
   if(state.modal){const dialog=$('.modal'); if(dialog){dialog.scrollTop=0;dialog.querySelector('input:not([type="hidden"])')?.focus({preventScroll:true});}}
 }
+let refreshGeneration=0;
 async function refresh({silent=false}={}){
   if(state.loading||!state.me)return;
-  state.loading=true;
+  const generation=++refreshGeneration,uid=state.me.id;
+  const active=()=>generation===refreshGeneration&&state.me?.id===uid;
+  const first=!state.refreshAt;
+  state.loading=true;state.loadErrors=[];
   if(!silent)render();
+  const failures=[];
+  const queries=[
+      ['contacts',()=>rows('contacts',{select:'id,name,phone,whatsapp_jid,created_at',order:'created_at.desc',limit:'1000'})],
+      ['conversations',()=>rows('conversations',{select:'id,contact_id,remote_jid,instance_name,chat_type,mode,last_message_at,created_at',order:'last_message_at.desc.nullslast',limit:'500'})],
+      ['messages',()=>rows('messages',{select:'id,conversation_id,direction,sender_type,content,created_at',order:'created_at.desc',limit:'700'})],
+      ['outcomes',()=>rows('conversation_outcomes',{select:'id,conversation_id,outcome,sentiment,summary,main_need,objections,next_action,extracted_by,confidence,recorded_at',order:'recorded_at.desc',limit:'700'})],
+      ['leads',()=>rows('leads',{select:'id,business_name,category,phone,whatsapp_phone,contact_id,email,website_url,website_status,city,address,source,lead_score,selected_for_crm,selected_at,pipeline_stage,notes,created_at,google_place_id,google_maps_url,dedupe_key,ai_message_draft',order:'created_at.desc',limit:'1000'})],
+      ['activities',()=>rows('crm_activities',{select:'id,lead_id,activity_type,title,description,status,due_at,completed_at,created_at',order:'created_at.desc',limit:'700'})],
+      ['botSettings',()=>rows('bot_settings',{select:'id,owner_id,instance_name,enabled,updated_at',instance_name:'eq.leadpilot',limit:'1'})]
+  ];
+  const canRender=()=>!state.modal&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
   try {
-    const [contacts,conversations,messages,outcomes,leads,activities,settings]=await Promise.all([
-      rows('contacts',{select:'id,name,phone,whatsapp_jid,created_at',order:'created_at.desc',limit:'1000'}),
-      rows('conversations',{select:'id,contact_id,remote_jid,instance_name,chat_type,mode,last_message_at,created_at',order:'last_message_at.desc.nullslast',limit:'500'}),
-      rows('messages',{select:'id,conversation_id,direction,sender_type,content,created_at',order:'created_at.desc',limit:'700'}),
-      rows('conversation_outcomes',{select:'id,conversation_id,outcome,sentiment,summary,main_need,objections,next_action,extracted_by,confidence,recorded_at',order:'recorded_at.desc',limit:'700'}),
-      rows('leads',{select:'id,business_name,category,phone,whatsapp_phone,contact_id,email,website_url,website_status,city,address,source,lead_score,selected_for_crm,selected_at,pipeline_stage,notes,created_at,google_place_id,google_maps_url,dedupe_key,ai_message_draft',order:'created_at.desc',limit:'1000'}),
-      rows('crm_activities',{select:'id,lead_id,activity_type,title,description,status,due_at,completed_at,created_at',order:'created_at.desc',limit:'700'}),
-      rows('bot_settings',{select:'id,owner_id,instance_name,enabled,updated_at',instance_name:'eq.leadpilot',limit:'1'})
-    ]);
-    state.data={contacts,conversations,messages,outcomes,leads,activities,botSettings:settings?.[0]||null};
-    state.refreshAt=Date.now();
-    if(state.selectedChat && !conversations.some(c=>c.id===state.selectedChat)){state.selectedChat=null;state.thread=[];}
-    if(state.view==='inbox'&&!state.selectedChat&&conversations.length)void openChat(conversations[0].id);
-  }catch(e){toast('Erro ao carregar dados: '+e.message,true);}
-  finally{state.loading=false;render();}
+    await Promise.allSettled(queries.map(async ([key,query])=>{
+      try{
+        const data=await query();if(!active())return;
+        state.data[key]=key==='botSettings'?data?.[0]||null:data;
+        if(first&&canRender())render();
+      }catch(e){if(active())failures.push(key);}
+    }));
+    if(!active())return;
+    state.loadErrors=failures;
+    if(failures.length<queries.length)state.refreshAt=Date.now();
+    if(state.selectedChat&&!failures.includes('conversations')&&!state.data.conversations.some(c=>c.id===state.selectedChat)){state.selectedChat=null;state.thread=[];}
+    if(state.view==='inbox'&&!state.selectedChat&&state.data.conversations.length)void openChat(state.data.conversations[0].id);
+    if(failures.length&&!silent)toast('Alguns dados não puderam ser sincronizados. Atualize para tentar novamente.',true);
+  }finally{if(active()){state.loading=false;if(canRender()||!silent)render();}}
 }
 async function openChat(id){
   state.selectedChat=id;state.view='inbox';state.thread=[];state.mobileMenu=false;
@@ -316,7 +330,7 @@ document.addEventListener('click',async e=>{
   if(el.hasAttribute('data-nav')){pageLink(el.dataset.nav);return;}
   if(el.hasAttribute('data-refresh')){await refresh();return;}
   if(el.hasAttribute('data-menu')){state.mobileMenu=!state.mobileMenu;render();return;}
-  if(el.hasAttribute('data-logout')){await run(async()=>{await signOut();state.me=null;state.data={contacts:[],conversations:[],messages:[],outcomes:[],leads:[],activities:[],botSettings:null};state.refreshAt=null;state.importSelection.clear();render();});return;}
+  if(el.hasAttribute('data-logout')){await run(async()=>{refreshGeneration++;state.loading=false;await signOut();state.me=null;state.loadErrors=[];state.data={contacts:[],conversations:[],messages:[],outcomes:[],leads:[],activities:[],botSettings:null};state.refreshAt=null;state.importSelection.clear();render();});return;}
   if(el.hasAttribute('data-open-lead')){e.preventDefault();state.modal={type:'lead',destination:el.dataset.destination||'crm'};render();return;}
   if(el.hasAttribute('data-edit-lead')){state.modal={type:'lead',id:el.dataset.editLead};render();return;}
   if(el.hasAttribute('data-open-task')){if(!chosenLeads().length){toast('Cadastre ou selecione um lead antes de criar uma atividade.',true);return;}state.modal={type:'task'};render();return;}
@@ -496,10 +510,10 @@ document.addEventListener('dragend',()=>{dragged=null;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.modal){state.modal=null;render();}});
 
 async function start(){
-  try{config();state.me=await restoreSession();}catch(e){state.ready=true;$('#app').innerHTML=`<div class="config-error"><div class="brand-mark">${icon('bolt',27)}</div><h1>Configuração necessária</h1><p>${esc(e.message)}</p><p>Confira <code>SUPABASE_URL</code> e <code>SUPABASE_PUBLISHABLE_KEY</code> na Vercel e faça um novo deploy.</p></div>`;return;}
+  try{config();state.me=await restoreSession();}catch(e){state.ready=true;$('#app').innerHTML=`<div class="config-error"><div class="brand-mark">${icon('bolt',27)}</div><h1>Não foi possível conectar</h1><p>${esc(e.message)}</p><button class="btn primary" onclick="location.reload()">Tentar novamente</button></div>`;return;}
   state.view=labels[location.hash.slice(1)]?location.hash.slice(1):'overview';
   state.ready=true;render();
-  if(state.me)await refresh();
-  setInterval(()=>{if(!state.me||state.modal||state.loading||document.hidden)return;const focused=document.activeElement?.tagName;if(['INPUT','TEXTAREA','SELECT'].includes(focused))return;void refresh({silent:true});},45_000);
+  if(state.me)void refresh();
+  setInterval(()=>{if(!state.me||state.modal||state.loading||state.busy||document.hidden)return;const focused=document.activeElement?.tagName;if(['INPUT','TEXTAREA','SELECT'].includes(focused))return;void refresh({silent:true});},60_000);
 }
 void start();

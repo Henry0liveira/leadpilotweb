@@ -3,6 +3,12 @@
 const SESSION_KEY = 'leadpilot.session.v1';
 let current = null;
 let refreshInFlight = null;
+let restoreInFlight = null;
+let sessionGeneration=0;
+export async function boundedFetch(url,options={},timeout=12000){
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeout);
+  try{return await fetch(url,{...options,signal:controller.signal});}catch(e){if(controller.signal.aborted)throw Error('O Supabase demorou para responder. Tente atualizar os dados.');throw e;}finally{clearTimeout(timer);}
+}
 export function config() {
   const cfg = typeof window !== 'undefined' ? window.LEADPILOT_CONFIG : null;
   if(!cfg?.url || !cfg?.key || cfg.key.startsWith('sb_secret_')) {
@@ -24,13 +30,13 @@ export function user() {return read()?.user || null;}
 function responseError(status, data) {
   const code = data?.code || data?.error_code || '';
   const detail = data?.msg || data?.error_description || data?.message || data?.error || '';
-  if(status===401 || status===403) return new Error('Acesso não autorizado. Verifique a sessão e suas permissões.');
+  if(status===401 || status===403) return Object.assign(new Error('Acesso não autorizado. Verifique a sessão e suas permissões.'),{status});
   if(code==='23505') return new Error('Este registro já existe no CRM.');
   return new Error(detail && String(detail).length < 220 ? detail : `Erro ao acessar Supabase (HTTP ${status}).`);
 }
 async function authFetch(path, payload, token) {
   const cfg = config();
-  const response = await fetch(cfg.url + '/auth/v1/' + path, {
+  const response = await boundedFetch(cfg.url + '/auth/v1/' + path, {
     method: payload ? 'POST' : 'GET',
     headers: {'apikey':cfg.key,'Content-Type':'application/json', ...(token?{Authorization:'Bearer '+token}:{})},
     ...(payload ? {body:JSON.stringify(payload)} : {}),
@@ -53,7 +59,7 @@ function ingestAuth(response) {
   return session;
 }
 export async function login(email,password) {
-  workspaceCache=null;
+  sessionGeneration++;workspaceCache=null;
   const result = await authFetch('token?grant_type=password',{email,password});
   const session = ingestAuth(result);
   if(!session.user?.id){await signOut(); throw new Error('Usuário não encontrado na sessão.');}
@@ -64,7 +70,9 @@ async function refresh() {
   refreshInFlight = (async()=>{
     const session = read();
     if(!session?.refresh_token) throw new Error('Sua sessão expirou. Entre novamente.');
+    const generation=sessionGeneration;
     const result = await authFetch('token?grant_type=refresh_token',{refresh_token:session.refresh_token});
+    if(generation!==sessionGeneration)throw Error('Sessão alterada.');
     return ingestAuth(result);
   })();
   try {return await refreshInFlight;} finally {refreshInFlight=null;}
@@ -77,40 +85,49 @@ export async function accessToken() {
 }
 export async function restoreSession() {
   if(!read()?.refresh_token)return null;
-  try {
-    let token=await accessToken();
-    let profile;
-    try {profile=await authFetch('user',null,token);}
-    catch {token=(await refresh()).access_token; profile=await authFetch('user',null,token);}
-    if(!profile?.id) throw new Error('Usuário inválido');
-    const s=read(); save({...s,user:profile});
-    return profile;
-  } catch {save(null);return null;}
+  if(restoreInFlight)return restoreInFlight;
+  const generation=sessionGeneration;
+  restoreInFlight=(async()=>{
+    try {
+      let token=await accessToken(),profile;
+      try{profile=await authFetch('user',null,token);}
+      catch(e){if(![401,403].includes(e.status))throw e;token=(await refresh()).access_token;profile=await authFetch('user',null,token);}
+      if(generation!==sessionGeneration)return null;
+      if(!profile?.id){save(null);return null;}
+      save({...read(),user:profile});return profile;
+    }catch(e){if(generation!==sessionGeneration)return null;if([401,403].includes(e.status)){save(null);return null;}throw e;}
+  })();
+  try{return await restoreInFlight;}finally{restoreInFlight=null;}
 }
 export async function signOut() {
-  workspaceCache=null;
+  sessionGeneration++;workspaceCache=null;
   const token=read()?.access_token;
   save(null);
   if(token) {
     try {await authFetch('logout',{},token);} catch { /* sessão local já revogada */ }
   }
 }
-export async function rest(table,{method='GET',params={},body,count=false}={}) {
+export async function rest(table,{method='GET',params={},body,count=false,prefer}={}) {
   const cfg=config();
   const query=new URLSearchParams(params);
   const url=cfg.url+'/rest/v1/'+encodeURIComponent(table)+(query.size?'?'+query:'');
   const token=await accessToken();
   const headers={apikey:cfg.key,Authorization:'Bearer '+token,'Content-Type':'application/json'};
   if(method==='POST'||method==='PATCH'||method==='DELETE') headers.Prefer='return=representation';
+  if(prefer)headers.Prefer=prefer;
   if(count) headers.Prefer=(headers.Prefer?headers.Prefer+',':'')+'count=exact';
-  let response=await fetch(url,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)}),cache:'no-store'});
+  let response=await boundedFetch(url,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)}),cache:'no-store'});
   if(response.status===401){
-    const session=await refresh();
-    response=await fetch(url,{method,headers:{...headers,Authorization:'Bearer '+session.access_token},...(body===undefined?{}:{body:JSON.stringify(body)}),cache:'no-store'});
+    const session=read()?.access_token!==token?read():await refresh();
+    if(!session?.access_token)throw Error('Sessão encerrada.');
+    response=await boundedFetch(url,{method,headers:{...headers,Authorization:'Bearer '+session.access_token},...(body===undefined?{}:{body:JSON.stringify(body)}),cache:'no-store'});
   }
   const data=await response.json().catch(()=>null);
   if(!response.ok)throw responseError(response.status,data);
   return {data:data??[],count:Number(response.headers.get('content-range')?.split('/').pop())||0};
+}
+export async function apiPath(path,method='GET',body,prefer='return=representation'){
+ const [table,...query]=path.split('?');return (await rest(table,{method,body,params:new URLSearchParams(query.join('?')),prefer})).data;
 }
 export const rows=async(table,params={})=>(await rest(table,{params})).data;
 let workspaceCache = null;

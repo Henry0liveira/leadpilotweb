@@ -1,4 +1,4 @@
-import {restoreSession,user,config} from './supabase.js';
+import {apiPath,user} from './supabase.js';
 const $=s=>document.querySelector(s), e=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const today=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'America/Sao_Paulo'}), money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}), date=v=>v?String(v).slice(0,10).split('-').reverse().join('/'):'—';
 const ps={draft:'Rascunho',sent:'Enviada',negotiation:'Em negociação',accepted:'Aprovada',declined:'Recusada',expired:'Expirada',cancelled:'Cancelada',superseded:'Substituída'},cs={draft:'Rascunho',sent:'Enviado para assinatura',signed:'Assinado',active:'Vigente',ended:'Encerrado',terminated:'Rescindido',cancelled:'Cancelado'};
@@ -27,14 +27,10 @@ function place(){
 new MutationObserver(place).observe(document.body,{childList:true,subtree:true});place();
 document.addEventListener('click',ev=>{const b=ev.target.closest('#app .sidebar button,#app .sidebar a,#app .sidebar [data-view]');if(b&&b!==proposalBtn&&b!==contractBtn&&!b.closest('#orb-proposals-launch,#orb-contracts-launch'))closePanel();},true);
 function closePanel(){panel.hidden=true;proposalBtn.classList.remove('orb-current');contractBtn.classList.remove('orb-current');}
-async function api(path,method='GET',data,prefer='return=representation'){
- await restoreSession();const sess=JSON.parse(sessionStorage.getItem('leadpilot.session.v1')||'null');if(!sess?.access_token||!user())throw Error('Sessão expirada. Entre novamente.');
- const c=config();const res=await fetch(c.url+'/rest/v1/'+path,{method,headers:{apikey:c.key,Authorization:'Bearer '+sess.access_token,'Content-Type':'application/json',Prefer:prefer},...(data===undefined?{}:{body:JSON.stringify(data)})});
- if(!res.ok){let err;try{err=await res.json()}catch{}throw Error(err?.message||'Falha na comunicação ('+res.status+').');}
- return res.status===204?[]:await res.json();
-}
+const api=apiPath;
 async function load(){
- const m=await api('workspace_members?select=workspace_owner_id,display_name,role&role=eq.admin');if(!m.length)throw Error('Workspace não autorizado.');owner=m[0].workspace_owner_id;meName=m[0].display_name||'';
+ const uid=user()?.id;if(!uid)throw Error('Sessão expirada. Entre novamente.');
+ const m=await api('workspace_members?select=workspace_owner_id,display_name,role&role=eq.admin&user_id=eq.'+encodeURIComponent(uid));if(!m.length)throw Error('Workspace não autorizado.');owner=m[0].workspace_owner_id;meName=m[0].display_name||'';
  const [p,c,l,s,t]=await Promise.all([api('orbyta_proposals?owner_id=eq.'+owner+'&order=created_at.desc'),api('orbyta_contracts?owner_id=eq.'+owner+'&order=created_at.desc'),api('leads?select=id,business_name,phone,whatsapp_phone,email,address,city,state,website_url&owner_id=eq.'+owner+'&selected_for_crm=eq.true&order=business_name.asc&limit=1000'),api('orbyta_company_settings?owner_id=eq.'+owner),api('orbyta_document_templates?owner_id=eq.'+owner+'&order=name')]);
  proposals=p;records=mode==='proposal'?p:c;leads=l;company=s[0]?.data||{};templates=t;
 }
