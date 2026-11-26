@@ -1,4 +1,4 @@
-const fields='places.id,places.displayName,places.formattedAddress,places.businessStatus,places.websiteUri,places.nationalPhoneNumber,places.rating,places.userRatingCount,places.googleMapsUri,places.attributions,nextPageToken';
+const fields='places.id,places.displayName,places.formattedAddress,places.businessStatus,places.websiteUri,places.nationalPhoneNumber,places.internationalPhoneNumber,places.rating,places.userRatingCount,places.googleMapsUri,places.attributions,nextPageToken';
 const limits=new Map();
 export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now}={}){
  return async function handler(req,res){
@@ -25,7 +25,7 @@ export function createHandler({fetchImpl=fetch,env=process.env,now=Date.now}={})
    const r=await fetchImpl('https://places.googleapis.com/v1/places:searchText',{method:'POST',headers:{'Content-Type':'application/json','X-Goog-Api-Key':google,'X-Goog-FieldMask':fields},body:JSON.stringify({textQuery:category.trim()+' em '+city.trim()+', Brasil',languageCode:'pt-BR',regionCode:'BR',pageSize:20,...(pageToken?{pageToken}:{})}),signal:AbortSignal.timeout(12000)});
    if(!r.ok)return res.status(r.status===429?429:502).json({error:r.status===429?'Limite da API Google atingido.':'Google Places recusou a consulta. Verifique faturamento, restrições da chave e Places API (New).'});
    const data=await r.json();
-   return res.status(200).json({places:(data.places||[]).filter(p=>p.businessStatus!=='CLOSED_PERMANENTLY').map(p=>({id:p.id,name:p.displayName?.text||'',address:p.formattedAddress||'',phone:p.nationalPhoneNumber||null,website:p.websiteUri||null,rating:p.rating??null,reviews:p.userRatingCount??null,maps:p.googleMapsUri||null,attributions:p.attributions||[]})),nextPageToken:data.nextPageToken||null});
+   return res.status(200).json({places:(data.places||[]).filter(p=>p.businessStatus!=='CLOSED_PERMANENTLY').map(p=>({id:p.id,name:p.displayName?.text||'',address:p.formattedAddress||'',phone:p.nationalPhoneNumber||p.internationalPhoneNumber||null,website:p.websiteUri||null,rating:p.rating??null,reviews:p.userRatingCount??null,maps:p.googleMapsUri||null,attributions:p.attributions||[]})),nextPageToken:data.nextPageToken||null});
   }catch{return res.status(502).json({error:'Não foi possível consultar os estabelecimentos.'});}
  };
 }

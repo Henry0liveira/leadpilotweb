@@ -1,0 +1,8 @@
+const socialHosts=['instagram.com','facebook.com','fb.com','tiktok.com','linkedin.com','youtube.com','youtu.be','wa.me','whatsapp.com','linktr.ee','beacons.ai','ifood.com.br'];
+export function siteStatus(value,checked=false){try{const u=new URL(value);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)return 'unknown';return socialHosts.some(s=>u.hostname===s||u.hostname.endsWith('.'+s))?'social':'present';}catch{return checked&&!String(value||'').trim()?'absent':'unknown';}}
+export const hasRealSite=value=>siteStatus(value)==='present';
+export function celularBR(value){const s=String(value||'').trim();if(!/^[+\d\s().-]+$/.test(s))return '';let d=s.replace(/\D/g,'');if(d.length===13&&d.startsWith('55'))d=d.slice(2);return /^[1-9][1-9]9\d{8}$/.test(d)?'55'+d:'';}
+export function formatCelular(value){const n=celularBR(value);return n?'('+n.slice(2,4)+') '+n.slice(4,9)+'-'+n.slice(9):'';}
+export const whatsappLink=value=>{const n=celularBR(value);return n?'https://wa.me/'+n:'';};
+export function scorePlace(p){const status=siteStatus(p.website,p.websiteChecked===true),reasons=[];let score=0;const add=(v,r)=>{score+=v;reasons.push(r);};if(status==='absent')add(55,'Sem site confirmado');else if(status==='social')add(45,'Rede social informada');else if(status==='present')add(-25,'Site próprio informado');if(p.phone)add(18,'Telefone informado');if(celularBR(p.phone))add(10,'Celular brasileiro');if(Number.isFinite(p.reviews)&&p.reviews>0&&p.reviews<30)add(8,'Poucas avaliações');if(Number.isFinite(p.rating)&&p.rating>=4)add(5,'Boa avaliação');return {score:Math.max(0,Math.min(100,score)),reasons,status};}
+export function enrich(p){return {...p,cellular:celularBR(p.phone),websiteState:siteStatus(p.website,true)};}

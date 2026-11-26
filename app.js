@@ -208,7 +208,7 @@ function modalHtml(){
 }
 function page(){switch(state.view){case 'inbox':return inbox();case 'insights':return insights();case 'crm':return crm();case 'prospects':return placesMarkup()+prospects();case 'tasks':return tasks();case 'contacts':return contacts();default:return overview();}}
 function render(){
-  setPlacesContext(state.me?.id||null,state.view,render);
+  setPlacesContext(state.me?.id||null,state.view,render,refresh);
   const root=$('#app');if(!root)return;
   if(!state.ready){root.innerHTML='<div class="app-boot"><div class="boot-mark">✦</div><p>Preparando seu workspace…</p></div>';return;}
   if(!state.me){root.innerHTML=loginHtml();return;}
