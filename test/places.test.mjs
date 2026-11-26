@@ -6,4 +6,17 @@ test('unauthenticated requests cannot call upstream',async()=>{const r=res();awa
 test('workspace membership required',async()=>{const r=res();let n=0;await createHandler({env,fetchImpl:async()=>({ok:true,json:async()=>++n===1?{id:'not-member'}:[]})})(req,r);assert.equal(r.code,403)});
 test('authorized search maps results and keeps key server side',async()=>{const r=res();let n=0;await createHandler({env,fetchImpl:async(url,opt)=>{n++;if(n===1)return {ok:true,json:async()=>({id:'member-test'})};if(n===2)return {ok:true,json:async()=>[{user_id:'member-test'}]};assert.equal(url,'https://places.googleapis.com/v1/places:searchText');assert.equal(opt.headers['X-Goog-Api-Key'],'fake-test');return {ok:true,json:async()=>({places:[{id:'one',displayName:{text:'Example'},nationalPhoneNumber:'123',rating:4.8}],nextPageToken:'next'})}}})(req,r);assert.equal(r.code,200);assert.equal(r.data.places[0].phone,'123');assert.equal(r.data.places[0].website,null);assert.equal(r.data.nextPageToken,'next');assert.ok(!JSON.stringify(r.data).includes('fake-test'))});
 
-test('expanded official search reads pages, deduplicates and preserves international phones',async()=>{let n=0;const r=res();await createHandler({env,fetchImpl:async(url,opt)=>{n++;if(n===1)return {ok:true,json:async()=>({id:'expanded-member'})};if(n===2)return {ok:true,json:async()=>[{user_id:'expanded-member'}]};assert.equal(url,'https://places.googleapis.com/v1/places:searchText');assert.ok(opt.headers['X-Goog-FieldMask'].includes('places.internationalPhoneNumber'));assert.ok(opt.headers['X-Goog-FieldMask'].includes('places.websiteUri'));if(n===3)return {ok:true,json:async()=>({places:[{id:'a',internationalPhoneNumber:'+55 12 99999-1234'}],nextPageToken:'second'})};assert.equal(JSON.parse(opt.body).pageToken,'second');return {ok:true,json:async()=>({places:[{id:'a'},{id:'b',websiteUri:'https://instagram.com/example'}]})};}})({...req,body:{...req.body,limit:40}},r);assert.equal(r.code,200);assert.equal(r.data.places.length,2);assert.equal(r.data.places[0].phone,'+55 12 99999-1234');assert.equal(r.data.places[0].websiteChecked,true);assert.equal(r.data.coverage.withPhone,1);assert.equal(r.data.coverage.withWebsite,1);assert.equal(r.data.nextPageToken,null);});
+test('expanded official search', async () => {
+ let n=0; const r=res();
+ const fetchImpl=async(url,opt)=>{
+  n++;
+  if(n===1)return {ok:true,json:async()=>({id:'expanded-member'})};
+  if(n===2)return {ok:true,json:async()=>[{user_id:'expanded-member'}]};
+  assert.ok(opt.headers['X-Goog-FieldMask'].includes('places.internationalPhoneNumber'));
+  if(n===3)return {ok:true,json:async()=>({places:[{id:'a',internationalPhoneNumber:'+55 12 99999-1234'}],nextPageToken:'second'})};
+  assert.equal(JSON.parse(opt.body).pageToken,'second');
+  return {ok:true,json:async()=>({places:[{id:'a'},{id:'b',websiteUri:'https://instagram.com/example'}]})};
+ };
+ await createHandler({env,fetchImpl})({...req,body:{...req.body,limit:40}},r);
+ assert.equal(r.code,200);assert.equal(r.data.places.length,2);assert.equal(r.data.places[0].phone,'+55 12 99999-1234');assert.equal(r.data.coverage.withPhone,1);assert.equal(r.data.coverage.withWebsite,1);
+});
