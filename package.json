@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/places.test.mjs"
+    "test": "node --test test/*.test.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "141.0.0",
+    "puppeteer-core": "24.23.1"
   }
 }
