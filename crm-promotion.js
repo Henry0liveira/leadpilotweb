@@ -1,4 +1,4 @@
-import {rows,rest,workspaceOwner} from './supabase.js';
+import {rows,rest,workspaceOwner,add} from './supabase.js';
 import {generateDedupeKey,isSameLead} from './importer.js';
 export function matchCandidates(list,lead){const key=generateDedupeKey(lead);return list.filter(x=>isSameLead(x,lead)||(key&&x.dedupe_key===key));}
 export function promotionPatch(now=new Date()){return {selected_for_crm:true,selected_at:now.toISOString(),pipeline_stage:'new'};}
@@ -24,3 +24,16 @@ export async function findExistingLead(lead,{getOwner=workspaceOwner,getRows=row
  return matches[0]||null;
 }
 export function searchKeyword(value){return String(value||'').trim().replace(/\s+/g,' ').slice(0,100);}
+
+export const REFERENCE_NAME='Estabelecimento Google Maps';
+export function referenceFields(placeId,now=new Date()){
+ if(typeof placeId!=='string'||!/^[A-Za-z0-9_-]{5,200}$/.test(placeId))throw Error('Identificador Google Places inválido.');
+ return {business_name:REFERENCE_NAME,google_place_id:placeId,dedupe_key:'google:'+placeId,source:'manual',selected_for_crm:true,selected_at:now.toISOString(),pipeline_stage:'new',website_status:'unknown'};
+}
+export async function savePlaceReference(placeId,{find=findExistingLead,insert=add,promote=promoteLead,isActive=()=>true}={}){
+ const fields=referenceFields(placeId);
+ const existing=await find({google_place_id:placeId});if(!isActive())throw Error('Sessão ou tela alterada.');
+ if(existing){if(!existing.selected_for_crm)await promote(existing.id);return {id:existing.id,already:!!existing.selected_for_crm};}
+ try{const records=await insert('leads',fields);if(!records?.[0]?.id)throw Error('Cadastro não confirmado.');return {id:records[0].id,already:false};}
+ catch(error){if(!isActive())throw error;const concurrent=await find({google_place_id:placeId});if(!concurrent||!isActive())throw error;if(!concurrent.selected_for_crm)await promote(concurrent.id);return {id:concurrent.id,already:!!concurrent.selected_for_crm};}
+}
