@@ -20,3 +20,6 @@ test('expanded official search', async () => {
  await createHandler({env,fetchImpl})({...req,body:{...req.body,limit:40}},r);
  assert.equal(r.code,200);assert.equal(r.data.places.length,2);assert.equal(r.data.places[0].phone,'+55 12 99999-1234');assert.equal(r.data.coverage.withPhone,1);assert.equal(r.data.coverage.withWebsite,1);
 });
+
+test('authorized details lookup returns live fields and no API key',async()=>{let n=0;const r=res();await createHandler({env,fetchImpl:async(url,opt)=>{n++;if(n===1)return {ok:true,json:async()=>({id:'details-member'})};if(n===2)return {ok:true,json:async()=>[{user_id:'details-member'}]};assert.equal(url,'https://places.googleapis.com/v1/places/ChIJtest');assert.ok(opt.headers['X-Goog-FieldMask'].includes('internationalPhoneNumber'));return {ok:true,json:async()=>({id:'ChIJtest',displayName:{text:'Example'},internationalPhoneNumber:'+55 12 99999-1234',formattedAddress:'Rua A'})};}})({...req,body:{placeId:'ChIJtest'}},r);assert.equal(r.code,200);assert.equal(r.data.place.name,'Example');assert.equal(r.data.place.phone,'+55 12 99999-1234');assert.ok(!JSON.stringify(r.data).includes('fake-test'));});
+test('invalid details identifier rejected before upstream',async()=>{const r=res();await createHandler({env,fetchImpl:()=>{throw Error('unexpected')}})({...req,body:{placeId:'../bad'}},r);assert.equal(r.code,400);});
