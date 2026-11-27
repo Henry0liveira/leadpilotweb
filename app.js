@@ -1,6 +1,6 @@
 import {accessToken} from './supabase.js';
 import { placesMarkup, setPlacesContext } from './places.js';
-import {promoteLead} from './crm-promotion.js';
+import {promoteLead,REFERENCE_NAME} from './crm-promotion.js';
 import { config, login, restoreSession, signOut, user, rows, rest, add, edit, workspaceOwner, deleteLead, generateLeadMessage } from './supabase.js';
 import { parseImport, isSameLead } from './importer.js';
 
@@ -147,21 +147,21 @@ function whatsappNumber(lead){
 }
 
 let liveCrmDetails=new Map(),liveCrmOwner=null,liveCrmBusy=false,liveCrmEpoch=0;
-async function loadCrmDetails(){
+async function loadCrmDetails(id){
  const uid=state.me?.id;if(!uid||state.view!=='crm'||liveCrmBusy)return;
- const lead=chosenLeads().find(l=>l.google_place_id&&l.business_name==='Estabelecimento Google Maps'&&!liveCrmDetails.has(l.google_place_id));
+ const lead=chosenLeads().find(l=>l.id===id&&l.google_place_id&&l.business_name===REFERENCE_NAME);
  if(!lead)return;
  liveCrmBusy=true;const epoch=liveCrmEpoch;
- try{const token=await accessToken();const response=await fetch('/api/places',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({placeId:lead.google_place_id}),cache:'no-store'});const data=await response.json();if(epoch===liveCrmEpoch&&state.me?.id===uid)liveCrmDetails.set(lead.google_place_id,response.ok?data.place:null);}
- catch{if(epoch===liveCrmEpoch)liveCrmDetails.set(lead.google_place_id,null);}
+ try{const token=await accessToken();const response=await fetch('/api/places',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({placeId:lead.google_place_id}),cache:'no-store'});const data=await response.json();if(!response.ok||!data.place)throw Error(data.error||'Ficha indisponível.');if(epoch===liveCrmEpoch&&state.me?.id===uid&&state.view==='crm')liveCrmDetails.set(lead.google_place_id,data.place);}
+ catch(e){if(epoch===liveCrmEpoch)toast(e.message||'Falha ao consultar ficha.',true);}
  finally{if(epoch===liveCrmEpoch){liveCrmBusy=false;if(state.view==='crm')render();}}
 }
 function crm(){
-  const pipeline=chosenLeads().map(l=>{const p=liveCrmDetails.get(l.google_place_id);return l.business_name==='Estabelecimento Google Maps'&&p?{...l,business_name:p.name||l.business_name,phone:p.phone||null,livePlace:p}:l;});
+  const pipeline=chosenLeads().map(l=>{const p=liveCrmDetails.get(l.google_place_id);return l.business_name===REFERENCE_NAME?{...l,referenceOnly:true,...(p?{business_name:p.name||l.business_name,phone:p.phone||null,livePlace:p}:{})}:l;});
   return `<div class="lead-quick-actions"><button type="button" class="btn primary" data-open-lead>${icon('plus',17)} Criar lead manual</button><span>Cadastre um estabelecimento diretamente no CRM.</span></div><div class="crm-intro"><div class="crm-intro-copy">${icon('kanban',19)} <span>Arraste os cards entre as colunas ou abra o lead para editar a etapa.</span></div><span>${pipeline.length} leads selecionados</span></div>
     <div class="kanban-scroll"><div class="kanban-board">${STAGES.map(([stage,title],idx)=>{
       const items=pipeline.filter(l=>l.pipeline_stage===stage);
-      return `<section class="kanban-column" data-drop-stage="${stage}"><div class="column-head"><span class="stage-marker stage-${idx}"></span><h3>${title}</h3><span class="column-count">${items.length}</span></div><div class="column-cards">${items.map(l=>`<article class="pipeline-card" draggable="true" data-drag-lead="${l.id}"><div class="pipeline-card-head"><div class="tiny-company">${esc(initials(l.business_name))}</div>${l.lead_score!==null?badge('Score '+l.lead_score,'soft'):''}</div><h4>${esc(truncate(l.business_name,36))}</h4>${l.google_place_id&&l.livePlace?`<small>Google Maps · ficha ao vivo</small><p>${esc(l.livePlace.phone||'Telefone não informado')}</p>${l.livePlace.maps?`<a href="https://www.google.com/maps/search/?api=1&query=Google&query_place_id=${encodeURIComponent(l.google_place_id)}" target="_blank" rel="noopener noreferrer">Abrir ficha</a>`:''}`:''}<p>${esc(l.category||'Empresa')} ${l.city?' · '+esc(l.city):''}</p>${l.contact_id?`<div class="lead-match-chip">${icon('link',13)} WhatsApp relacionado</div>`:''}<button type="button" class="btn outline small lead-draft-button" data-message-lead="${l.id}">${icon('spark',14)} Mensagem IA / WhatsApp</button><div class="pipeline-footer">${l.phone?`<span>${icon('messages',14)} WhatsApp / telefone</span>`:`<span>${icon('clock',14)} Sem telefone</span>`}<button type="button" data-edit-lead="${l.id}" class="tiny-action" title="Editar lead" aria-label="Editar ${esc(l.business_name)}">${icon('arrow',16)}</button><button type="button" data-delete-lead="${l.id}" class="tiny-action delete-lead-btn" title="Excluir lead" aria-label="Excluir ${esc(l.business_name)}">${icon('trash',16)}</button></div></article>`).join('')}${items.length?'':`<div class="kanban-empty">Arraste leads para esta etapa</div>`}</div></section>`;
+      return `<section class="kanban-column" data-drop-stage="${stage}"><div class="column-head"><span class="stage-marker stage-${idx}"></span><h3>${title}</h3><span class="column-count">${items.length}</span></div><div class="column-cards">${items.map(l=>`<article class="pipeline-card" draggable="true" data-drag-lead="${l.id}"><div class="pipeline-card-head"><div class="tiny-company">${esc(initials(l.business_name))}</div>${l.lead_score!==null?badge('Score '+l.lead_score,'soft'):''}</div><h4>${esc(truncate(l.business_name,36))}</h4>${l.referenceOnly?`<button type="button" class="btn outline small" data-live-place="${l.id}" ${liveCrmBusy?'disabled':''}>${l.livePlace?'Atualizar ficha':'Consultar ficha Google Maps'}</button>`:''}${l.google_place_id&&l.livePlace?`<small>Google Maps · ficha ao vivo</small><p>${esc(l.livePlace.phone||'Telefone não informado')}</p><p>${esc(l.livePlace.address||'Endereço não informado')}</p>${(l.livePlace.attributions||[]).map(a=>`<small>${esc(a.provider||'')}</small>`).join('')}${l.livePlace.maps?`<a href="https://www.google.com/maps/search/?api=1&query=Google&query_place_id=${encodeURIComponent(l.google_place_id)}" target="_blank" rel="noopener noreferrer">Abrir ficha</a>`:''}`:''}<p>${esc(l.category||'Empresa')} ${l.city?' · '+esc(l.city):''}</p>${l.contact_id?`<div class="lead-match-chip">${icon('link',13)} WhatsApp relacionado</div>`:''}<button type="button" class="btn outline small lead-draft-button" data-message-lead="${l.id}">${icon('spark',14)} Mensagem IA / WhatsApp</button><div class="pipeline-footer">${l.phone?`<span>${icon('messages',14)} WhatsApp / telefone</span>`:`<span>${icon('clock',14)} Sem telefone</span>`}<button type="button" data-edit-lead="${l.id}" class="tiny-action" title="Editar lead" aria-label="Editar ${esc(l.business_name)}">${icon('arrow',16)}</button><button type="button" data-delete-lead="${l.id}" class="tiny-action delete-lead-btn" title="Excluir lead" aria-label="Excluir ${esc(l.business_name)}">${icon('trash',16)}</button></div></article>`).join('')}${items.length?'':`<div class="kanban-empty">Arraste leads para esta etapa</div>`}</div></section>`;
     }).join('')}</div></div>${pipeline.length?'':`<div class="empty-cta">${empty('Seu CRM começa com um lead','Crie um lead manualmente ou selecione os que importou na aba Prospecção.','kanban')}<button class="btn primary" data-open-lead>${icon('plus',16)} Adicionar primeiro lead</button></div>`}`;
 }
 function prospects(){
@@ -221,13 +221,12 @@ function modalHtml(){
 function page(){switch(state.view){case 'inbox':return inbox();case 'insights':return insights();case 'crm':return crm();case 'prospects':return placesMarkup()+prospects();case 'tasks':return tasks();case 'contacts':return contacts();default:return overview();}}
 function render(){
   if(liveCrmOwner!==state.me?.id){liveCrmOwner=state.me?.id;liveCrmDetails.clear();liveCrmEpoch++;liveCrmBusy=false;}
-  if(state.view!=='crm'&&liveCrmDetails.size){liveCrmDetails.clear();liveCrmEpoch++;liveCrmBusy=false;}
+  if(state.view!=='crm'&&(liveCrmDetails.size||liveCrmBusy)){liveCrmDetails.clear();liveCrmEpoch++;liveCrmBusy=false;}
   setPlacesContext(state.me?.id||null,state.view,render,refresh);
   const root=$('#app');if(!root)return;
   if(!state.ready){root.innerHTML='<div class="app-boot"><div class="boot-mark">✦</div><p>Preparando seu workspace…</p></div>';return;}
   if(!state.me){root.innerHTML=loginHtml();return;}
   root.innerHTML=shell(page());
-  if(state.view==='crm')void loadCrmDetails();
   if(state.modal){const dialog=$('.modal'); if(dialog){dialog.scrollTop=0;dialog.querySelector('input:not([type="hidden"])')?.focus({preventScroll:true});}}
 }
 async function refresh({silent=false}={}){
@@ -268,12 +267,14 @@ document.addEventListener('click',e=>{
 },true);
 // Delegação: listeners são preservados mesmo depois de cada atualização da interface.
 document.addEventListener('click',async e=>{
-  const el=e.target.closest('button[data-nav],button[data-refresh],button[data-logout],button[data-menu],button[data-open-lead],button[data-edit-lead],button[data-open-task],button[data-modal-close],button[data-modal-dismiss],button[data-chat],button[data-done],button[data-outcome-filter],button[data-select-all],button[data-promote],button[data-promote-one],button[data-file-trigger],button[data-delete-lead],button[data-delete-selected],button[data-link-conversation],button[data-toggle-bot],button[data-conversation-mode],button[data-message-lead],button[data-generate-message],button[data-open-whatsapp]');
+  const el=e.target.closest('button[data-nav],button[data-refresh],button[data-logout],button[data-menu],button[data-open-lead],button[data-edit-lead],button[data-open-task],button[data-modal-close],button[data-modal-dismiss],button[data-chat],button[data-done],button[data-outcome-filter],button[data-select-all],button[data-promote],button[data-promote-one],button[data-file-trigger],button[data-delete-lead],button[data-delete-selected],button[data-link-conversation],button[data-toggle-bot],button[data-conversation-mode],button[data-message-lead],button[data-generate-message],button[data-open-whatsapp],button[data-live-place]');
   if(!el)return;
 
+  if(el.hasAttribute('data-live-place')){await loadCrmDetails(el.dataset.livePlace);return;}
   if(el.hasAttribute('data-message-lead')){
     const lead=leadOf(el.dataset.messageLead);
     if(!lead)return;
+    if(lead.google_place_id&&lead.business_name===REFERENCE_NAME){toast('Cadastre o nome e os dados de fonte própria ou licenciada em Editar lead antes de gerar uma mensagem personalizada.',true);return;}
     state.modal={type:'ai-draft',id:lead.id,draft:lead.ai_message_draft||''};
     render();return;
   }
